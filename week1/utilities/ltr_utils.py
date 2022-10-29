@@ -105,6 +105,8 @@ def create_feature_log_query(query, doc_ids, click_prior_query, featureset_name,
     }
 
     q = {
+        'size': size,
+        '_source': False,
         'query': { 'bool': bool_q },
         # Turn on feature logging so that we get weights back for our features
         "ext": ext_q,
