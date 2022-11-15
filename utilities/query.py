@@ -190,7 +190,7 @@ def create_query(user_query, click_prior_query, filters, sort="_score", sortDir=
     return query_obj
 
 
-def search(client, user_query, index="bbuy_products", sort="_score", sortDir="desc", use_synonyms=False):
+def search(client, user_query, index="bbuy_products", sort="_score", sortDir="desc", use_synonyms=False, text_only=False):
     #### W3: classify the query
     #### W3: create filters and boosts
     # Note: you may also want to modify the `create_query` method above
@@ -200,7 +200,13 @@ def search(client, user_query, index="bbuy_products", sort="_score", sortDir="de
     response = client.search(query_obj, index=index)
     if response and response['hits']['hits'] and len(response['hits']['hits']) > 0:
         hits = response['hits']['hits']
-        print(json.dumps(response, indent=2))
+        if text_only:
+            for h in hits:
+                h = h["_source"]
+                print("Name:", h.get('name',[])[0])
+                print("Descr:", h['shortDescription'][0][:100], "-"*80)
+        else:
+            print(json.dumps(response, indent=2))
 
 
 if __name__ == "__main__":
@@ -219,6 +225,7 @@ if __name__ == "__main__":
                          help='The OpenSearch admin.  If this is set, the program will prompt for password too. If not set, use default of admin/admin')
     general.add_argument('--synonyms', action='store_true', help='Use "name.synonyms" instead of "name"')
     general.add_argument('-q', '--query', required=True, help='the text query to search in ES')
+    general.add_argument('-t', '--text-only', action="store_true", help="keep only text from response JSON")
 
 
     args = parser.parse_args()
@@ -254,5 +261,6 @@ if __name__ == "__main__":
         client=opensearch, 
         user_query=args.query, 
         index=index_name, 
-        use_synonyms=use_synonyms
+        use_synonyms=use_synonyms,
+        text_only=args.text_only
     )
