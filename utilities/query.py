@@ -11,6 +11,7 @@ from urllib.parse import urljoin
 import pandas as pd
 import fileinput
 import logging
+import fasttext
 
 
 logger = logging.getLogger(__name__)
@@ -48,14 +49,37 @@ def create_prior_queries(doc_ids, doc_id_weights,
     return click_prior_query
 
 
+# Given a list of (category, confidence) it will create an array of `match` query predicates
+def create_category_matches(categories, boost=100):
+    matches = [] # we will accumulate all "match" queries in here
+
+    for cat, conf in categories:
+        cat = cat[9:] # remove __label__
+        print("Categ:", cat, "Conf:", round(conf,2))
+        q = { 
+            "match": {
+                "categoryPathIds.keyword": { 
+                    "query": cat,
+                    "boost": boost*conf
+                    }
+                }
+            }
+        matches.append(q)
+    print("\n")
+    return matches
+
+
+
 # Hardcoded query here.  Better to use search templates or other query config.
+# TODO: `filter` is masking the reserved word. Rename it
 def create_query(user_query, click_prior_query, filters, sort="_score", sortDir="desc", size=10, source=None,
-                 use_synonyms=False):
+                 use_synonyms=False, categories=[], filter=False):
 
     name_field = 'name.synonyms' if use_synonyms  else 'name'
 
     query_obj = {
         'size': size,
+        "track_total_hits": True,
         "sort": [
             {sort: {"order": sortDir}}
         ],
@@ -171,8 +195,10 @@ def create_query(user_query, click_prior_query, filters, sort="_score", sortDir=
             }
         }
     }
+    # get the nested "bool" query from the function score
+    bool_query = query_obj["query"]["function_score"]["query"]["bool"]
     if click_prior_query is not None and click_prior_query != "":
-        query_obj["query"]["function_score"]["query"]["bool"]["should"].append({
+        bool_query["should"].append({
             "query_string": {
                 # This may feel like cheating, but it's really not, esp. in ecommerce where you have all this prior data,  You just can't let the test clicks leak in, which is why we split on date
                 "query": click_prior_query,
@@ -187,24 +213,58 @@ def create_query(user_query, click_prior_query, filters, sort="_score", sortDir=
             print("Couldn't replace query for *")
     if source is not None:  # otherwise use the default and retrieve all source
         query_obj["_source"] = source
+
+    if not categories:
+        # if there are not categories, don't manipulte the query further
+        return query_obj
+    
+    cat_matches = create_category_matches(categories)
+
+    if filter:
+        # if filtering use a `filter` query
+        bool_query["filter"] = cat_matches
+    else:
+        # Add the new clauses the existing `should` query. The "minimum_should_match"
+        # option should ensure that it will not make filtering any stricter, just boosting
+        bool_query['should'] += cat_matches
     return query_obj
 
 
-def search(client, user_query, index="bbuy_products", sort="_score", sortDir="desc", use_synonyms=False, text_only=False):
+# returns a list of pairs of (category, confidence)
+def predict_categories(query, model, conf_threshold=.1, max_k=5):
+    if not model:
+        return []
+    preds = model.predict(query, k=max_k)
+    # transpose fastext output to create pairs of (label, confidence)
+    labels_and_weights = zip(*preds)
+
+    # return only the pairs with a confidence higher than conf_threshold
+    return list(
+        filter(lambda p: p[1]> conf_threshold, labels_and_weights)
+    )
+
+
+def search(client, user_query, index="bbuy_products", sort="_score", sortDir="desc", use_synonyms=False, 
+            text_only=False, categories=[], filter=False):
     #### W3: classify the query
     #### W3: create filters and boosts
     # Note: you may also want to modify the `create_query` method above
     query_obj = create_query(user_query, click_prior_query=None, filters=None, sort=sort, sortDir=sortDir, source=["name", "shortDescription"], 
-                            use_synonyms=use_synonyms)
+                            use_synonyms=use_synonyms, categories=categories, filter=filter)
     logging.info(query_obj)
     response = client.search(query_obj, index=index)
+    total_hits = response['hits']['total']['value']
+    print("Total Hits: ", total_hits, "\n\n")
     if response and response['hits']['hits'] and len(response['hits']['hits']) > 0:
         hits = response['hits']['hits']
         if text_only:
             for h in hits:
+                # Print in a readable form
                 h = h["_source"]
-                print("Name:", h.get('name',[])[0])
-                print("Descr:", h['shortDescription'][0][:100], "-"*80)
+                print("Name:\t｜", h.get('name',[])[0])
+                descr = h['shortDescription']
+                if descr:
+                    print("Descr:\t｜", descr[0][:80], "\n", "-"*90)
         else:
             print(json.dumps(response, indent=2))
 
@@ -226,6 +286,8 @@ if __name__ == "__main__":
     general.add_argument('--synonyms', action='store_true', help='Use "name.synonyms" instead of "name"')
     general.add_argument('-q', '--query', required=True, help='the text query to search in ES')
     general.add_argument('-t', '--text-only', action="store_true", help="keep only text from response JSON")
+    general.add_argument('--ft-model', help="The binary fasttext model file")
+    general.add_argument('--filter-categories', action="store_true", help="filter instead of boosting")
 
 
     args = parser.parse_args()
@@ -256,11 +318,18 @@ if __name__ == "__main__":
     )
     index_name = args.index
 
+    fasttext_model = fasttext.load_model(args.ft_model) if args.ft_model else None
+
+    # create a list of categories and confidences
+    category_pairs = predict_categories(args.query, fasttext_model)
+
     # serch prints the response
     search(
         client=opensearch, 
         user_query=args.query, 
         index=index_name, 
         use_synonyms=use_synonyms,
-        text_only=args.text_only
+        text_only=args.text_only,
+        filter=args.filter_categories,
+        categories=category_pairs,
     )
