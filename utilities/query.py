@@ -218,7 +218,7 @@ def create_query(user_query, click_prior_query, filters, sort="_score", sortDir=
         # if there are not categories, don't manipulte the query further
         return query_obj
     
-    cat_matches = create_category_matches(categories)
+    cat_matches = create_category_matches(categories, boost=20)
 
     if filter:
         # if filtering use a `filter` query
@@ -254,17 +254,19 @@ def search(client, user_query, index="bbuy_products", sort="_score", sortDir="de
     logging.info(query_obj)
     response = client.search(query_obj, index=index)
     total_hits = response['hits']['total']['value']
-    print("Total Hits: ", total_hits, "\n\n")
+    print("Total Hits: ", total_hits, "\n")
     if response and response['hits']['hits'] and len(response['hits']['hits']) > 0:
         hits = response['hits']['hits']
         if text_only:
             for h in hits:
                 # Print in a readable form
                 h = h["_source"]
-                print("Name:\t｜", h.get('name',[])[0])
+                #print("Name:\t｜", h.get('name',[])[0])
+                print(h.get('name',[])[0])
                 descr = h['shortDescription']
                 if descr:
-                    print("Descr:\t｜", descr[0][:80], "\n", "-"*90)
+                    #print("Descr:\t｜", descr[0][:80], "\n", "-"*90)
+                    pass
         else:
             print(json.dumps(response, indent=2))
 
