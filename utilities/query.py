@@ -11,7 +11,7 @@ from urllib.parse import urljoin
 import pandas as pd
 import fileinput
 import logging
-#import fasttext
+import fasttext
 from sentence_transformers import SentenceTransformer
 
 sentence_model = SentenceTransformer('paraphrase-MiniLM-L6-v2')
@@ -232,19 +232,40 @@ def create_query(user_query, click_prior_query, filters, sort="_score", sortDir=
     return query_obj
 
 
-def create_vector_query(user_query, size=10):
+def create_vector_query(user_query, categories=None, filter=False, size=10):
     user_query_vector = sentence_model.encode(user_query)
+    knn_q = {
+        "knn": {
+            "name_emb": {
+                "vector": user_query_vector,
+                "k": size
+            }
+        }
+    }
+
+    # we might not actuall use `cat_q`
+
     q = {
         "size": size,
         "query": {
-        "knn": {
-        "name_emb": {
-            "vector": user_query_vector,
-            "k": size
+            "bool": {
+                "must":[
+                    knn_q
+                ],
             }
         }
-        }
     }
+
+    if categories and filter:
+        cat_q = create_category_matches(categories, boost=0) if filter else []
+        q['query']['bool'].update({
+            'should': cat_q,
+            "minimum_should_match": 1
+        })
+
+        # update K for KNN for giving more docs the chance to be retrieved
+        knn_q["knn"]["name_emb"]["k"] *= 10
+        print("filtering", categories)
 
     return q
 
@@ -273,7 +294,7 @@ def search(client, user_query, index="bbuy_products", sort="_score", sortDir="de
 
     # over-write `query_obj` if vector search
     if vector_search:
-        query_obj=create_vector_query(user_query)
+        query_obj=create_vector_query(user_query, categories, filter)
 
     logging.info(query_obj)
     response = client.search(query_obj, index=index)

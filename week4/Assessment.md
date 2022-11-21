@@ -1,3 +1,5 @@
+## Querying
+
 here is the output of some queries with "regular" vs vector search
 
 "iphone" (regular)
@@ -36,6 +38,7 @@ Apple® - The new iPad® with Wi-Fi + Cellular - 64GB (Verizon) - White
 achieving the tota hits of 113...  
 Anyway it's clear that the results are more "semantic", since the actual word "iphone"
 is missing from some of them, but they're also conceputally relevant (eg. Ipad).
+(Note: phones and tablets seem to be on the same bestbuy category)
 
 "galaxy" (regular)
 ```
@@ -109,3 +112,32 @@ Ok this is somewhat better. Adding another word to the query seems to be adding
 a lot of more semantic informantion. It seems to now know we're talking about a 
 smartphone.  
 Good.
+
+## Filtering
+"galaxy" (vector + filtering)
+```
+Total Hits:  2 
+
+Samsung - Galaxy Tab 10.1 - 16GB - White
+Samsung Galaxy Tab 2 7.0 Tablet, Stylus and Screen Protector Package
+```
+OK this is much improved!! Why just 2 hits though?  
+We should give our KNN the chance to retreive more docs.  Let's change the logic
+ to update K by a factor of 10:
+
+ ```
+ Total Hits:  29 
+
+Samsung - Galaxy Tab 10.1 - 16GB - White
+Samsung - Galaxy Tab 3G (Verizon Wireless)
+Samsung - Galaxy Tab with 16GB Memory - Chic White
+Samsung - Galaxy Tab 10.1 - 32GB - White
+Samsung - Galaxy Tab 10.1 with 16GB Memory - Metallic Gray
+Samsung Galaxy Tab 2 7.0 Tablet, Stylus and Screen Protector Package
+Samsung - Galaxy Tab 10.1 with 32GB Memory - Metallic Gray
+Samsung - Galaxy Tab 7.0 Plus with 16GB Memory - Metallic Gray
+Samsung - Galaxy Tab 10.1 with 16GB Memory (Verizon) - Metallic Gray
+Samsung - Slate Tablet - Black
+ ```
+
+This is greately improved!
