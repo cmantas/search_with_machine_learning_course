@@ -11,8 +11,10 @@ from urllib.parse import urljoin
 import pandas as pd
 import fileinput
 import logging
-import fasttext
+#import fasttext
+from sentence_transformers import SentenceTransformer
 
+sentence_model = SentenceTransformer('paraphrase-MiniLM-L6-v2')
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -230,6 +232,23 @@ def create_query(user_query, click_prior_query, filters, sort="_score", sortDir=
     return query_obj
 
 
+def create_vector_query(user_query, size=10):
+    user_query_vector = sentence_model.encode(user_query)
+    q = {
+        "size": size,
+        "query": {
+        "knn": {
+        "name_emb": {
+            "vector": user_query_vector,
+            "k": size
+            }
+        }
+        }
+    }
+
+    return q
+
+
 # returns a list of pairs of (category, confidence)
 def predict_categories(query, model, conf_threshold=.1, max_k=5):
     if not model:
@@ -245,12 +264,17 @@ def predict_categories(query, model, conf_threshold=.1, max_k=5):
 
 
 def search(client, user_query, index="bbuy_products", sort="_score", sortDir="desc", use_synonyms=False, 
-            text_only=False, categories=[], filter=False):
+            text_only=False, categories=[], filter=False, vector_search=False):
     #### W3: classify the query
     #### W3: create filters and boosts
     # Note: you may also want to modify the `create_query` method above
     query_obj = create_query(user_query, click_prior_query=None, filters=None, sort=sort, sortDir=sortDir, source=["name", "shortDescription"], 
                             use_synonyms=use_synonyms, categories=categories, filter=filter)
+
+    # over-write `query_obj` if vector search
+    if vector_search:
+        query_obj=create_vector_query(user_query)
+
     logging.info(query_obj)
     response = client.search(query_obj, index=index)
     total_hits = response['hits']['total']['value']
@@ -290,6 +314,7 @@ if __name__ == "__main__":
     general.add_argument('-t', '--text-only', action="store_true", help="keep only text from response JSON")
     general.add_argument('--ft-model', help="The binary fasttext model file")
     general.add_argument('--filter-categories', action="store_true", help="filter instead of boosting")
+    general.add_argument('-v', '--vector-search', action="store_true", help="use vector search")
 
 
     args = parser.parse_args()
@@ -334,4 +359,5 @@ if __name__ == "__main__":
         text_only=args.text_only,
         filter=args.filter_categories,
         categories=category_pairs,
+        vector_search=args.vector_search,
     )
