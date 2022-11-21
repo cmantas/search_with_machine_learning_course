@@ -10,6 +10,8 @@ from opensearchpy import OpenSearch
 from opensearchpy.helpers import bulk
 import logging
 import fasttext
+from sentence_transformers import SentenceTransformer
+
 from pathlib import Path
 import requests
 import json
@@ -20,7 +22,8 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 logging.basicConfig(format='%(levelname)s:%(message)s')
 
-# IMPLEMENT ME: import the sentence transformers module!
+sentence_model = SentenceTransformer('paraphrase-MiniLM-L6-v2')
+
 
 # NOTE: this is not a complete list of fields.  If you wish to add more, put in the appropriate XPath expression.
 #TODO: is there a way to do this using XPath/XSL Functions so that we don't have to maintain a big list?
@@ -104,6 +107,17 @@ def get_opensearch():
     return client
 
 
+def add_vector_data(docs, field="name"):
+    "adds embedding vectors to the documents"
+    # dig in the documents and get the texts for the field specified
+    texts = [ d['_source'][field][0] for d in docs]
+    # create embeddings for the texts using the sentence_model
+    embeddings = sentence_model.encode(texts)
+    for e_vector, doc in zip(embeddings, docs):
+        # add the embedding vector to the doc
+        doc['_source'][field+"_emb"] = e_vector
+
+
 def index_file(file, index_name, reduced=False):
     logger.info("Creating Model")
     # IMPLEMENT ME: instantiate the sentence transformer model!
@@ -123,6 +137,12 @@ def index_file(file, index_name, reduced=False):
     # in the '_source' part of each docs entry, before calling bulk
     # to index them 200 at a time. Make sure to clear the names array
     # when you clear the docs array!
+
+    def do_index(batch):
+        "Small helper function for indexing a batch of docs"
+        add_vector_data(batch)
+        bulk(client, batch, request_timeout=60)
+ 
     for child in children:
         doc = {}
         for idx in range(0, len(mappings), 2):
@@ -141,12 +161,12 @@ def index_file(file, index_name, reduced=False):
         docs_indexed += 1
         if docs_indexed % 200 == 0:
             logger.info("Indexing")
-            bulk(client, docs, request_timeout=60)
+            do_index(docs)
             logger.info(f'{docs_indexed} documents indexed')
             docs = []
             names = []
     if len(docs) > 0:
-        bulk(client, docs, request_timeout=60)
+        do_index(docs)
         logger.info(f'{docs_indexed} documents indexed')
     return docs_indexed
 
